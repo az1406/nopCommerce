@@ -31,6 +31,8 @@ using Nop.Services.Shipping;
 using Nop.Services.Stores;
 using Nop.Services.Tax;
 using Nop.Services.Vendors;
+using Nop.Services.Orders.Rules;
+using Nop.Services.Rules;
 
 namespace Nop.Services.Orders;
 
@@ -2374,10 +2376,7 @@ public partial class OrderProcessingService : IOrderProcessingService
     {
         ArgumentNullException.ThrowIfNull(order);
 
-        if (order.OrderStatus == OrderStatus.Cancelled)
-            return false;
-
-        return true;
+        return NopRuleEngine.StartSession(OrderOperations.Tag, order).Allows(OrderOperation.Cancel);
     }
 
     /// <summary>
