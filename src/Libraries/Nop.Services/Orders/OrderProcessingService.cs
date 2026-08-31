@@ -2559,15 +2559,7 @@ public partial class OrderProcessingService : IOrderProcessingService
     {
         ArgumentNullException.ThrowIfNull(order);
 
-        if (order.OrderStatus == OrderStatus.Cancelled)
-            return false;
-
-        if (order.PaymentStatus == PaymentStatus.Paid ||
-            order.PaymentStatus == PaymentStatus.Refunded ||
-            order.PaymentStatus == PaymentStatus.Voided)
-            return false;
-
-        return true;
+        return NopRuleEngine.StartSession(OrderOperations.Tag, order).Allows(OrderOperation.MarkAsPaid);
     }
 
     /// <summary>

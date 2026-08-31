@@ -36,3 +36,22 @@ public class OrderCanBeMarkedAsAuthorizedRule : Rule
             .Do(ctx => ctx.Insert(new OperationAllowed(OrderOperation.MarkAsAuthorized)));
     }
 }
+
+[Name("An order that is not cancelled and whose payment is not yet settled can be marked as paid"), Tag(OrderOperations.Tag)]
+public class OrderCanBeMarkedAsPaidRule : Rule
+{
+    public override void Define()
+    {
+        Order order = default;
+
+        When()
+            .Match(() => order,
+                o => o.OrderStatus != OrderStatus.Cancelled,
+                o => o.PaymentStatus != PaymentStatus.Paid,
+                o => o.PaymentStatus != PaymentStatus.Refunded,
+                o => o.PaymentStatus != PaymentStatus.Voided);
+
+        Then()
+            .Do(ctx => ctx.Insert(new OperationAllowed(OrderOperation.MarkAsPaid)));
+    }
+}

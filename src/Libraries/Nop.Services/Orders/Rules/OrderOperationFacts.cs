@@ -5,7 +5,8 @@ namespace Nop.Services.Orders.Rules;
 public enum OrderOperation
 {
     Cancel,
-    MarkAsAuthorized
+    MarkAsAuthorized,
+    MarkAsPaid
 }
 
 public sealed class OperationAllowed(OrderOperation operation)
