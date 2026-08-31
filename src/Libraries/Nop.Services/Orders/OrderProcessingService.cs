@@ -2432,13 +2432,7 @@ public partial class OrderProcessingService : IOrderProcessingService
     {
         ArgumentNullException.ThrowIfNull(order);
 
-        if (order.OrderStatus == OrderStatus.Cancelled)
-            return false;
-
-        if (order.PaymentStatus == PaymentStatus.Pending)
-            return true;
-
-        return false;
+        return NopRuleEngine.StartSession(OrderOperations.Tag, order).Allows(OrderOperation.MarkAsAuthorized);
     }
 
     /// <summary>
