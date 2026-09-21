@@ -75,3 +75,21 @@ public class OrderCanBeCapturedRule : Rule
             .Do(ctx => ctx.Insert(new OperationAllowed(OrderOperation.Capture)));
     }
 }
+
+[Name("An order that cost something, whose payment is authorized and whose payment method supports voiding can be voided"), Tag(OrderOperations.Tag)]
+public class OrderCanBeVoidedRule : Rule
+{
+    public override void Define()
+    {
+        Order order = default;
+
+        When()
+            .Match(() => order,
+                o => o.OrderTotal != decimal.Zero,
+                o => o.PaymentStatus == PaymentStatus.Authorized)
+            .Match<IPaymentMethod>(paymentMethod => paymentMethod.SupportVoid);
+
+        Then()
+            .Do(ctx => ctx.Insert(new OperationAllowed(OrderOperation.Void)));
+    }
+}
