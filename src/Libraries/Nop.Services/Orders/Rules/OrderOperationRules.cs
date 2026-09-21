@@ -1,6 +1,7 @@
 ﻿using Nop.Core.Domain.Orders;
 using Nop.Core.Domain.Payments;
 using NRules.Fluent.Dsl;
+using Nop.Services.Payments;
 
 namespace Nop.Services.Orders.Rules;
 
@@ -56,8 +57,8 @@ public class OrderCanBeMarkedAsPaidRule : Rule
     }
 }
 
-[Name("Capturing needs the gateway asked when the order is neither cancelled nor pending and its payment is authorized"), Tag(OrderOperations.Tag)]
-public class CaptureNeedsGatewayAskedRule : Rule
+[Name("An order that is neither cancelled nor pending, whose payment is authorized and whose payment method supports capturing can be captured"), Tag(OrderOperations.Tag)]
+public class OrderCanBeCapturedRule : Rule
 {
     public override void Define()
     {
@@ -67,21 +68,8 @@ public class CaptureNeedsGatewayAskedRule : Rule
             .Match(() => order,
                 o => o.OrderStatus != OrderStatus.Cancelled,
                 o => o.OrderStatus != OrderStatus.Pending,
-                o => o.PaymentStatus == PaymentStatus.Authorized);
-
-        Then()
-            .Do(ctx => ctx.Insert(new GatewayProbeRequired(OrderOperation.Capture)));
-    }
-}
-
-[Name("An order whose capture was worth asking about and whose gateway supports capturing can be captured"), Tag(OrderOperations.Tag)]
-public class OrderCanBeCapturedRule : Rule
-{
-    public override void Define()
-    {
-        When()
-            .Exists<GatewayProbeRequired>(probe => probe.Operation == OrderOperation.Capture)
-            .Exists<GatewaySupports>(support => support.Operation == OrderOperation.Capture);
+                o => o.PaymentStatus == PaymentStatus.Authorized)
+            .Match<IPaymentMethod>(paymentMethod => paymentMethod.SupportCapture);
 
         Then()
             .Do(ctx => ctx.Insert(new OperationAllowed(OrderOperation.Capture)));

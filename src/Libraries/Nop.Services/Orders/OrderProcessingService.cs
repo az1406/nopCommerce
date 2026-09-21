@@ -2468,9 +2468,9 @@ public partial class OrderProcessingService : IOrderProcessingService
     {
         ArgumentNullException.ThrowIfNull(order);
 
-        return await NopRuleEngine.StartSession(OrderOperations.Tag, order)
-            .AllowsOnceGatewayAnswersAsync(OrderOperation.Capture,
-                () => _paymentService.SupportCaptureAsync(order.PaymentMethodSystemName));
+        var paymentMethod = await _paymentPluginManager.LoadPluginBySystemNameAsync(order.PaymentMethodSystemName);
+
+        return NopRuleEngine.StartSession(OrderOperations.Tag, order, paymentMethod).Allows(OrderOperation.Capture);
     }
 
     /// <summary>
