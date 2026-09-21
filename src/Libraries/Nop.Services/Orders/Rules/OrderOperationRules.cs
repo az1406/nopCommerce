@@ -55,3 +55,35 @@ public class OrderCanBeMarkedAsPaidRule : Rule
             .Do(ctx => ctx.Insert(new OperationAllowed(OrderOperation.MarkAsPaid)));
     }
 }
+
+[Name("Capturing needs the gateway asked when the order is neither cancelled nor pending and its payment is authorized"), Tag(OrderOperations.Tag)]
+public class CaptureNeedsGatewayAskedRule : Rule
+{
+    public override void Define()
+    {
+        Order order = default;
+
+        When()
+            .Match(() => order,
+                o => o.OrderStatus != OrderStatus.Cancelled,
+                o => o.OrderStatus != OrderStatus.Pending,
+                o => o.PaymentStatus == PaymentStatus.Authorized);
+
+        Then()
+            .Do(ctx => ctx.Insert(new GatewayProbeRequired(OrderOperation.Capture)));
+    }
+}
+
+[Name("An order whose capture was worth asking about and whose gateway supports capturing can be captured"), Tag(OrderOperations.Tag)]
+public class OrderCanBeCapturedRule : Rule
+{
+    public override void Define()
+    {
+        When()
+            .Exists<GatewayProbeRequired>(probe => probe.Operation == OrderOperation.Capture)
+            .Exists<GatewaySupports>(support => support.Operation == OrderOperation.Capture);
+
+        Then()
+            .Do(ctx => ctx.Insert(new OperationAllowed(OrderOperation.Capture)));
+    }
+}

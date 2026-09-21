@@ -2468,15 +2468,9 @@ public partial class OrderProcessingService : IOrderProcessingService
     {
         ArgumentNullException.ThrowIfNull(order);
 
-        if (order.OrderStatus == OrderStatus.Cancelled ||
-            order.OrderStatus == OrderStatus.Pending)
-            return false;
-
-        if (order.PaymentStatus == PaymentStatus.Authorized &&
-            await _paymentService.SupportCaptureAsync(order.PaymentMethodSystemName))
-            return true;
-
-        return false;
+        return await NopRuleEngine.StartSession(OrderOperations.Tag, order)
+            .AllowsOnceGatewayAnswersAsync(OrderOperation.Capture,
+                () => _paymentService.SupportCaptureAsync(order.PaymentMethodSystemName));
     }
 
     /// <summary>
