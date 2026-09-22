@@ -12,7 +12,8 @@ public enum OrderOperation
     Void,
     Refund,
     PartialRefund,
-    RefundOffline
+    RefundOffline,
+    PartialRefundOffline
 }
 
 public sealed class OperationAllowed(OrderOperation operation)

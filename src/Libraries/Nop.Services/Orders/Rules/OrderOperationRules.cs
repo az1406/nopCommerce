@@ -150,3 +150,22 @@ public class OrderCanBeRefundedOfflineRule : Rule
             .Do(ctx => ctx.Insert(new OperationAllowed(OrderOperation.RefundOffline)));
     }
 }
+
+[Name("An order that cost something, still has an unrefunded balance covering the requested amount and is paid or partially refunded can be partially refunded offline"), Tag(OrderOperations.Tag)]
+public class OrderCanBePartiallyRefundedOfflineRule : Rule
+{
+    public override void Define()
+    {
+        Order order = default;
+
+        When()
+            .Match(() => order,
+                o => o.OrderTotal != decimal.Zero,
+                o => o.OrderTotal - o.RefundedAmount > decimal.Zero,
+                o => o.PaymentStatus == PaymentStatus.Paid || o.PaymentStatus == PaymentStatus.PartiallyRefunded)
+            .Match<RefundRequest>(request => request.Amount <= order.OrderTotal - order.RefundedAmount);
+
+        Then()
+            .Do(ctx => ctx.Insert(new OperationAllowed(OrderOperation.PartialRefundOffline)));
+    }
+}

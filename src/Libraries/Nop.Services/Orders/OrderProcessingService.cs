@@ -2843,25 +2843,7 @@ public partial class OrderProcessingService : IOrderProcessingService
     {
         ArgumentNullException.ThrowIfNull(order);
 
-        if (order.OrderTotal == decimal.Zero)
-            return false;
-
-        //uncomment the lines below in order to allow this operation for cancelled orders
-        //if (order.OrderStatus == OrderStatus.Cancelled)
-        //    return false;
-
-        var canBeRefunded = order.OrderTotal - order.RefundedAmount;
-        if (canBeRefunded <= decimal.Zero)
-            return false;
-
-        if (amountToRefund > canBeRefunded)
-            return false;
-
-        if (order.PaymentStatus == PaymentStatus.Paid ||
-            order.PaymentStatus == PaymentStatus.PartiallyRefunded)
-            return true;
-
-        return false;
+        return NopRuleEngine.StartSession(OrderOperations.Tag, order, new RefundRequest(amountToRefund)).Allows(OrderOperation.PartialRefundOffline);
     }
 
     /// <summary>
