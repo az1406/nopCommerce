@@ -10,12 +10,18 @@ public enum OrderOperation
     MarkAsPaid,
     Capture,
     Void,
-    Refund
+    Refund,
+    PartialRefund
 }
 
 public sealed class OperationAllowed(OrderOperation operation)
 {
     public readonly OrderOperation Operation = operation;
+}
+
+public sealed class RefundRequest(decimal amount)
+{
+    public readonly decimal Amount = amount;
 }
 
 public static class OrderOperations

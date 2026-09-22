@@ -112,3 +112,23 @@ public class OrderCanBeRefundedRule : Rule
             .Do(ctx => ctx.Insert(new OperationAllowed(OrderOperation.Refund)));
     }
 }
+
+[Name("An order that cost something, still has an unrefunded balance covering the requested amount, is paid or partially refunded and whose payment method supports partial refunds can be partially refunded"), Tag(OrderOperations.Tag)]
+public class OrderCanBePartiallyRefundedRule : Rule
+{
+    public override void Define()
+    {
+        Order order = default;
+
+        When()
+            .Match(() => order,
+                o => o.OrderTotal != decimal.Zero,
+                o => o.OrderTotal - o.RefundedAmount > decimal.Zero,
+                o => o.PaymentStatus == PaymentStatus.Paid || o.PaymentStatus == PaymentStatus.PartiallyRefunded)
+            .Match<RefundRequest>(request => request.Amount <= order.OrderTotal - order.RefundedAmount)
+            .Match<IPaymentMethod>(paymentMethod => paymentMethod.SupportPartiallyRefund);
+
+        Then()
+            .Do(ctx => ctx.Insert(new OperationAllowed(OrderOperation.PartialRefund)));
+    }
+}
