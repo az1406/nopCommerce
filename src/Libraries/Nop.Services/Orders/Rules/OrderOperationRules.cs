@@ -132,3 +132,21 @@ public class OrderCanBePartiallyRefundedRule : Rule
             .Do(ctx => ctx.Insert(new OperationAllowed(OrderOperation.PartialRefund)));
     }
 }
+
+[Name("An order that cost something, was never refunded before and is paid can be refunded offline"), Tag(OrderOperations.Tag)]
+public class OrderCanBeRefundedOfflineRule : Rule
+{
+    public override void Define()
+    {
+        Order order = default;
+
+        When()
+            .Match(() => order,
+                o => o.OrderTotal != decimal.Zero,
+                o => o.RefundedAmount == decimal.Zero,
+                o => o.PaymentStatus == PaymentStatus.Paid);
+
+        Then()
+            .Do(ctx => ctx.Insert(new OperationAllowed(OrderOperation.RefundOffline)));
+    }
+}
