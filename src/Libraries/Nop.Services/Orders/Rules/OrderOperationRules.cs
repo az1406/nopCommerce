@@ -169,3 +169,20 @@ public class OrderCanBePartiallyRefundedOfflineRule : Rule
             .Do(ctx => ctx.Insert(new OperationAllowed(OrderOperation.PartialRefundOffline)));
     }
 }
+
+[Name("An order that cost something and whose payment is authorized can be voided offline"), Tag(OrderOperations.Tag)]
+public class OrderCanBeVoidedOfflineRule : Rule
+{
+    public override void Define()
+    {
+        Order order = default;
+
+        When()
+            .Match(() => order,
+                o => o.OrderTotal != decimal.Zero,
+                o => o.PaymentStatus == PaymentStatus.Authorized);
+
+        Then()
+            .Do(ctx => ctx.Insert(new OperationAllowed(OrderOperation.VoidOffline)));
+    }
+}

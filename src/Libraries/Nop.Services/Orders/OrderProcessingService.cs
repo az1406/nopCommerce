@@ -2978,18 +2978,9 @@ public partial class OrderProcessingService : IOrderProcessingService
     {
         ArgumentNullException.ThrowIfNull(order);
 
-        if (order.OrderTotal == decimal.Zero)
-            return false;
-
-        //uncomment the lines below in order to allow this operation for cancelled orders
-        //if (order.OrderStatus == OrderStatus.Cancelled)
-        //    return false;
-
-        if (order.PaymentStatus == PaymentStatus.Authorized)
-            return true;
-
-        return false;
+        return NopRuleEngine.StartSession(OrderOperations.Tag, order).Allows(OrderOperation.VoidOffline);
     }
+    
 
     /// <summary>
     /// Void order (offline)
