@@ -9,7 +9,8 @@ public enum OrderOperation
     MarkAsAuthorized,
     MarkAsPaid,
     Capture,
-    Void
+    Void,
+    Refund
 }
 
 public sealed class OperationAllowed(OrderOperation operation)

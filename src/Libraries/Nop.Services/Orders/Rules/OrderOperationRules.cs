@@ -93,3 +93,22 @@ public class OrderCanBeVoidedRule : Rule
             .Do(ctx => ctx.Insert(new OperationAllowed(OrderOperation.Void)));
     }
 }
+
+[Name("An order that cost something, was never refunded before, is paid and whose payment method supports refunding can be refunded"), Tag(OrderOperations.Tag)]
+public class OrderCanBeRefundedRule : Rule
+{
+    public override void Define()
+    {
+        Order order = default;
+
+        When()
+            .Match(() => order,
+                o => o.OrderTotal != decimal.Zero,
+                o => o.RefundedAmount == decimal.Zero,
+                o => o.PaymentStatus == PaymentStatus.Paid)
+            .Match<IPaymentMethod>(paymentMethod => paymentMethod.SupportRefund);
+
+        Then()
+            .Do(ctx => ctx.Insert(new OperationAllowed(OrderOperation.Refund)));
+    }
+}

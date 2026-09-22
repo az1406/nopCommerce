@@ -2593,22 +2593,9 @@ public partial class OrderProcessingService : IOrderProcessingService
     {
         ArgumentNullException.ThrowIfNull(order);
 
-        if (order.OrderTotal == decimal.Zero)
-            return false;
+        var paymentMethod = await _paymentPluginManager.LoadPluginBySystemNameAsync(order.PaymentMethodSystemName);
 
-        //refund cannot be made if previously a partial refund has been already done. only other partial refund can be made in this case
-        if (order.RefundedAmount > decimal.Zero)
-            return false;
-
-        //uncomment the lines below in order to disallow this operation for cancelled orders
-        //if (order.OrderStatus == OrderStatus.Cancelled)
-        //    return false;
-
-        if (order.PaymentStatus == PaymentStatus.Paid &&
-            await _paymentService.SupportRefundAsync(order.PaymentMethodSystemName))
-            return true;
-
-        return false;
+        return NopRuleEngine.StartSession(OrderOperations.Tag, order, paymentMethod).Allows(OrderOperation.Refund);
     }
 
     /// <summary>
