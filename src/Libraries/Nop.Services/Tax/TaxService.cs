@@ -13,6 +13,8 @@ using Nop.Services.Directory;
 using Nop.Services.Helpers;
 using Nop.Services.Logging;
 using Nop.Services.Tax.Events;
+using Nop.Services.Rules;
+using Nop.Services.Tax.Rules;
 
 namespace Nop.Services.Tax;
 
@@ -137,69 +139,59 @@ public partial class TaxService : ITaxService
     /// A task that represents the asynchronous operation
     /// The task result contains the package for tax calculation
     /// </returns>
-    protected virtual async Task<TaxRateRequest> PrepareTaxRateRequestAsync(Product product, int taxCategoryId, Customer customer, decimal price)
+     protected virtual async Task<TaxRateRequest> PrepareTaxRateRequestAsync(Product product, int taxCategoryId, Customer customer, decimal price)
     {
         ArgumentNullException.ThrowIfNull(customer);
 
         var store = await _storeContext.GetCurrentStoreAsync();
-        var taxRateRequest = new TaxRateRequest
+        var pickupPoint = await _genericAttributeService.GetAttributeAsync<PickupPoint>(customer,
+            NopCustomerDefaults.SelectedPickupPointAttribute, store.Id);
+
+        var candidates = new TaxAddressCandidates
+        {
+            PickupPointAddress = pickupPoint is null ? null : await LoadPickupPointTaxAddressAsync(pickupPoint),
+            DetectedCountry = _taxSettings.AutomaticallyDetectCountry
+                ? await _countryService.GetCountryByTwoLetterIsoCodeAsync(await _geoLookupService.LookupCountryIsoCodeAsync(_webHelper.GetCurrentIpAddress()))
+                : null,
+            BillingAddress = await _customerService.GetCustomerBillingAddressAsync(customer),
+            ShippingAddress = await _customerService.GetCustomerShippingAddressAsync(customer),
+            DefaultAddress = await LoadDefaultTaxAddressAsync()
+        };
+
+        return new TaxRateRequest
+        {
+            Customer = customer,
+            Product = product,
+            Price = price,
+ protected virtual async Task<TaxRateRequest> PrepareTaxRateRequestAsync(Product product, int taxCategoryId, Customer customer, decimal price)
+    {
+        ArgumentNullException.ThrowIfNull(customer);
+
+        var store = await _storeContext.GetCurrentStoreAsync();
+        var pickupPoint = await _genericAttributeService.GetAttributeAsync<PickupPoint>(customer,
+            NopCustomerDefaults.SelectedPickupPointAttribute, store.Id);
+
+        var candidates = new TaxAddressCandidates
+        {
+            PickupPointAddress = pickupPoint is null ? null : await LoadPickupPointTaxAddressAsync(pickupPoint),
+            DetectedCountry = _taxSettings.AutomaticallyDetectCountry
+                ? await _countryService.GetCountryByTwoLetterIsoCodeAsync(await _geoLookupService.LookupCountryIsoCodeAsync(_webHelper.GetCurrentIpAddress()))
+                : null,
+            BillingAddress = await _customerService.GetCustomerBillingAddressAsync(customer),
+            ShippingAddress = await _customerService.GetCustomerShippingAddressAsync(customer),
+            DefaultAddress = await LoadDefaultTaxAddressAsync()
+        };
+
+        return new TaxRateRequest
         {
             Customer = customer,
             Product = product,
             Price = price,
             TaxCategoryId = taxCategoryId > 0 ? taxCategoryId : product?.TaxCategoryId ?? 0,
-            CurrentStoreId = store.Id
+            CurrentStoreId = store.Id,
+            Address = NopRuleEngine.StartSession(TaxAddressing.Tag, _taxSettings, _shippingSettings, customer, candidates)
+                .Query<TaxAddress>().Single().Address
         };
-
-        var basedOn = _taxSettings.TaxBasedOn;
-
-        //tax is based on pickup point address
-        if (_taxSettings.TaxBasedOnPickupPointAddress && _shippingSettings.AllowPickupInStore)
-        {
-            var pickupPoint = await _genericAttributeService.GetAttributeAsync<PickupPoint>(customer,
-                NopCustomerDefaults.SelectedPickupPointAttribute, store.Id);
-            if (pickupPoint != null)
-            {
-                taxRateRequest.Address = await LoadPickupPointTaxAddressAsync(pickupPoint);
-                return taxRateRequest;
-            }
-        }
-
-        var autodetectedCountry = false;
-        var detectedAddress = new Address
-        {
-            CreatedOnUtc = DateTime.UtcNow
-        };
-
-        if (basedOn == TaxBasedOn.BillingAddress && customer.BillingAddressId == null ||
-            basedOn == TaxBasedOn.ShippingAddress && customer.ShippingAddressId == null)
-        {
-            if (_taxSettings.AutomaticallyDetectCountry)
-            {
-                var ipAddress = _webHelper.GetCurrentIpAddress();
-                var countryIsoCode = await _geoLookupService.LookupCountryIsoCodeAsync(ipAddress);
-                var country = await _countryService.GetCountryByTwoLetterIsoCodeAsync(countryIsoCode);
-
-                if (country != null)
-                {
-                    detectedAddress.CountryId = country.Id;
-                    autodetectedCountry = true;
-                }
-                else
-                    basedOn = TaxBasedOn.DefaultAddress;
-            }
-            else
-                basedOn = TaxBasedOn.DefaultAddress;
-        }
-
-        taxRateRequest.Address = basedOn switch
-        {
-            TaxBasedOn.BillingAddress => autodetectedCountry ? detectedAddress : await _customerService.GetCustomerBillingAddressAsync(customer),
-            TaxBasedOn.ShippingAddress => autodetectedCountry ? detectedAddress : await _customerService.GetCustomerShippingAddressAsync(customer),
-            _ => await LoadDefaultTaxAddressAsync(),
-        };
-
-        return taxRateRequest;
     }
 
     /// <summary>
