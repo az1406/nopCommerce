@@ -812,184 +812,91 @@ public partial class ShoppingCartService : IShoppingCartService
     {
         ArgumentNullException.ThrowIfNull(product);
 
-        var warnings = new List<string>();
-
-        //ensure it's our attributes
-        var attributes1 = await _productAttributeParser.ParseProductAttributeMappingsAsync(attributesXml);
-        if (ignoreNonCombinableAttributes)
-            attributes1 = attributes1.Where(x => !x.IsNonCombinable()).ToList();
-
-        foreach (var attribute in attributes1)
-        {
-            if (attribute.ProductId == 0)
-            {
-                warnings.Add("Attribute error");
-                return warnings;
-            }
-
-            if (attribute.ProductId != product.Id)
-                warnings.Add("Attribute error");
-        }
-
-        //validate required product attributes (whether they're chosen/selected/entered)
-        var attributes2 = await _productAttributeService.GetProductAttributeMappingsByProductIdAsync(product.Id);
-        if (ignoreNonCombinableAttributes)
-            attributes2 = attributes2.Where(x => !x.IsNonCombinable()).ToList();
-
-        //validate conditional attributes only (if specified)
-        if (!ignoreConditionMet)
-        {
-            attributes2 = await attributes2.WhereAwait(async x =>
-            {
-                var conditionMet = await _productAttributeParser.IsConditionMetAsync(x, attributesXml);
-                return !conditionMet.HasValue || conditionMet.Value;
-            }).ToListAsync();
-        }
-
-        foreach (var a2 in attributes2)
-        {
-            var productAttributeValues = await _productAttributeService.GetProductAttributeValuesAsync(a2.Id);
-
-            if (a2.IsRequired)
-            {
-                var found = false;
-                //selected product attributes
-                foreach (var a1 in attributes1)
-                {
-                    if (a1.Id != a2.Id)
-                        continue;
-
-                    var attributeValuesStr = _productAttributeParser.ParseValues(attributesXml, a1.Id);
-
-                    if (a2.ShouldHaveValues() && productAttributeValues.Any() && !productAttributeValues.Any(x => attributeValuesStr.Contains(x.Id.ToString())))
-                        break;
-
-                    foreach (var str1 in attributeValuesStr)
-                    {
-                        if (string.IsNullOrEmpty(str1.Trim()))
-                            continue;
-
-                        found = true;
-                        break;
-                    }
-                }
-
-                //if not found
-                if (!found)
-                {
-                    var productAttribute = await _productAttributeService.GetProductAttributeByIdAsync(a2.ProductAttributeId);
-
-                    var textPrompt = await _localizationService.GetLocalizedAsync(a2, x => x.TextPrompt);
-                    var notFoundWarning = !string.IsNullOrEmpty(textPrompt) ?
-                        textPrompt :
-                        string.Format(await _localizationService.GetResourceAsync("ShoppingCart.SelectAttribute"), await _localizationService.GetLocalizedAsync(productAttribute, a => a.Name));
-
-                    warnings.Add(notFoundWarning);
-                }
-            }
-
-            if (a2.AttributeControlType != AttributeControlType.ReadonlyCheckboxes)
-                continue;
-
-            //customers cannot edit read-only attributes
-            var allowedReadOnlyValueIds = productAttributeValues
-                .Where(x => x.IsPreSelected)
-                .Select(x => x.Id)
-                .ToArray();
-
-            var selectedReadOnlyValueIds = (await _productAttributeParser.ParseProductAttributeValuesAsync(attributesXml))
-                .Where(x => x.ProductAttributeMappingId == a2.Id)
-                .Select(x => x.Id)
-                .ToArray();
-
-            if (!CommonHelper.ArraysEqual(allowedReadOnlyValueIds, selectedReadOnlyValueIds))
-                warnings.Add("You cannot change read-only values");
-        }
-
-        //validation rules
-        foreach (var pam in attributes2)
-        {
-            if (!pam.ValidationRulesAllowed())
-                continue;
-
-            string enteredText;
-            int enteredTextLength;
-
-            var productAttribute = await _productAttributeService.GetProductAttributeByIdAsync(pam.ProductAttributeId);
-
-            //minimum length
-            if (pam.ValidationMinLength.HasValue)
-            {
-                if (pam.AttributeControlType == AttributeControlType.TextBox ||
-                    pam.AttributeControlType == AttributeControlType.MultilineTextbox)
-                {
-                    enteredText = _productAttributeParser.ParseValues(attributesXml, pam.Id).FirstOrDefault();
-                    enteredTextLength = string.IsNullOrEmpty(enteredText) ? 0 : enteredText.Length;
-
-                    if (pam.ValidationMinLength.Value > enteredTextLength)
-                        warnings.Add(string.Format(await _localizationService.GetResourceAsync("ShoppingCart.TextboxMinimumLength"), await _localizationService.GetLocalizedAsync(productAttribute, a => a.Name), pam.ValidationMinLength.Value));
-                }
-            }
-
-            //maximum length
-            if (!pam.ValidationMaxLength.HasValue)
-                continue;
-
-            if (pam.AttributeControlType != AttributeControlType.TextBox && pam.AttributeControlType != AttributeControlType.MultilineTextbox)
-                continue;
-
-            enteredText = _productAttributeParser.ParseValues(attributesXml, pam.Id).FirstOrDefault();
-            enteredTextLength = string.IsNullOrEmpty(enteredText) ? 0 : enteredText.Length;
-
-            if (pam.ValidationMaxLength.Value < enteredTextLength)
-                warnings.Add(string.Format(await _localizationService.GetResourceAsync("ShoppingCart.TextboxMaximumLength"), await _localizationService.GetLocalizedAsync(productAttribute, a => a.Name), pam.ValidationMaxLength.Value));
-        }
-
-        if (warnings.Any() || ignoreBundledProducts)
-            return warnings;
-
-        //validate bundled products
+        var store = await _storeContext.GetCurrentStoreAsync();
         var attributeValues = await _productAttributeParser.ParseProductAttributeValuesAsync(attributesXml);
-        foreach (var attributeValue in attributeValues)
+        var texts = new AttributeWarningTexts
         {
-            if (attributeValue.AttributeValueType != AttributeValueType.AssociatedToProduct)
-                continue;
+            SelectAttribute = await _localizationService.GetResourceAsync("ShoppingCart.SelectAttribute"),
+            MinimumLength = await _localizationService.GetResourceAsync("ShoppingCart.TextboxMinimumLength"),
+            MaximumLength = await _localizationService.GetResourceAsync("ShoppingCart.TextboxMaximumLength"),
+            AssociatedProductWarning = await _localizationService.GetResourceAsync("ShoppingCart.AssociatedAttributeWarning")
+        };
 
-            var productAttributeMapping = await _productAttributeService.GetProductAttributeMappingByIdAsync(attributeValue.ProductAttributeMappingId);
+        var selectedAttributes = (await _productAttributeParser.ParseProductAttributeMappingsAsync(attributesXml))
+            .Where(mapping => !ignoreNonCombinableAttributes || !mapping.IsNonCombinable())
+            .Select((mapping, index) => new SelectedAttribute { Mapping = mapping, Index = index });
 
-            if (productAttributeMapping == null)
-                continue;
-
-            if (ignoreNonCombinableAttributes && productAttributeMapping.IsNonCombinable())
-                continue;
-
-            //associated product (bundle)
-            var associatedProduct = await _productService.GetProductByIdAsync(attributeValue.AssociatedProductId);
-
-            if (associatedProduct != null)
+        var checkedAttributes = await (await (await _productAttributeService.GetProductAttributeMappingsByProductIdAsync(product.Id))
+                .Where(mapping => !ignoreNonCombinableAttributes || !mapping.IsNonCombinable())
+                .WhereAwait(async mapping => ignoreConditionMet || (await _productAttributeParser.IsConditionMetAsync(mapping, attributesXml) ?? true))
+                .ToListAsync())
+            .Select((mapping, index) => (mapping, index))
+            .SelectAwait(async pair =>
             {
-                var store = await _storeContext.GetCurrentStoreAsync();
-                var totalQty = quantity * attributeValue.Quantity;
-                var associatedProductWarnings = await GetShoppingCartItemWarningsAsync(customer,
-                    shoppingCartType, associatedProduct, store.Id,
-                    string.Empty, decimal.Zero, null, null, totalQty, false, shoppingCartItemId);
+                var productAttribute = await _productAttributeService.GetProductAttributeByIdAsync(pair.mapping.ProductAttributeId);
+                var name = await _localizationService.GetLocalizedAsync(productAttribute, attribute => attribute.Name);
+                var textPrompt = await _localizationService.GetLocalizedAsync(pair.mapping, mapping => mapping.TextPrompt);
 
-                var productAttribute = await _productAttributeService.GetProductAttributeByIdAsync(productAttributeMapping.ProductAttributeId);
-
-                foreach (var associatedProductWarning in associatedProductWarnings)
+                return new CheckedAttribute
                 {
-                    var attributeName = await _localizationService.GetLocalizedAsync(productAttribute, a => a.Name);
-                    var attributeValueName = await _localizationService.GetLocalizedAsync(attributeValue, a => a.Name);
-                    warnings.Add(string.Format(
-                        await _localizationService.GetResourceAsync("ShoppingCart.AssociatedAttributeWarning"),
-                        attributeName, attributeValueName, associatedProductWarning));
-                }
-            }
-            else
-                warnings.Add($"Associated product cannot be loaded - {attributeValue.AssociatedProductId}");
-        }
+                    Mapping = pair.mapping,
+                    Index = pair.index,
+                    Name = name,
+                    Prompt = string.IsNullOrEmpty(textPrompt) ? string.Format(texts.SelectAttribute, name) : textPrompt,
+                    Values = (await _productAttributeService.GetProductAttributeValuesAsync(pair.mapping.Id)).ToArray(),
+                    SelectedValues = _productAttributeParser.ParseValues(attributesXml, pair.mapping.Id).ToArray(),
+                    SelectedValueIds = attributeValues.Where(value => value.ProductAttributeMappingId == pair.mapping.Id).Select(value => value.Id).ToArray()
+                };
+            })
+            .ToListAsync();
 
-        return warnings;
+        var bundledProducts = await attributeValues
+            .Where(value => value.AttributeValueType == AttributeValueType.AssociatedToProduct)
+            .Select((value, index) => (value, index))
+            .SelectAwait(async pair => new BundledProduct
+            {
+                Value = pair.value,
+                Index = pair.index,
+                Mapping = await _productAttributeService.GetProductAttributeMappingByIdAsync(pair.value.ProductAttributeMappingId),
+                Product = await _productService.GetProductByIdAsync(pair.value.AssociatedProductId)
+            })
+            .ToListAsync();
+
+        var session = NopRuleEngine.StartSession(AttributeWarnings.Tag,
+        [
+            product, texts, new BundleOptions { Ignore = ignoreBundledProducts, IncludeNonCombinable = !ignoreNonCombinableAttributes },
+            .. selectedAttributes, .. checkedAttributes, .. bundledProducts
+        ]);
+
+        session.InsertAll(await session.Query<BundledProductIncluded>()
+            .Where(included => included.Bundle.Product != null)
+            .SelectManyAwait(async included =>
+            {
+                var productAttribute = await _productAttributeService.GetProductAttributeByIdAsync(included.Bundle.Mapping.ProductAttributeId);
+                var attributeName = await _localizationService.GetLocalizedAsync(productAttribute, attribute => attribute.Name);
+                var valueName = await _localizationService.GetLocalizedAsync(included.Bundle.Value, value => value.Name);
+                var warnings = await GetShoppingCartItemWarningsAsync(customer, shoppingCartType, included.Bundle.Product, store.Id,
+                    string.Empty, decimal.Zero, null, null, quantity * included.Bundle.Value.Quantity, false, shoppingCartItemId);
+
+                return warnings.Select((warning, index) => new BundledProductWarning
+                {
+                    Bundle = included.Bundle,
+                    AttributeName = attributeName,
+                    ValueName = valueName,
+                    Warning = warning,
+                    Index = index
+                });
+            })
+            .ToListAsync());
+        session.Fire();
+
+        var stop = session.Query<AttributeErrorStop>().Select(error => error.Order).DefaultIfEmpty(int.MaxValue).Min();
+
+        return session.Query<AttributeWarning>()
+            .Where(warning => warning.Order <= stop)
+            .OrderBy(warning => warning.Order)
+            .Select(warning => warning.Message)
+            .ToList();
     }
 
     /// <summary>
