@@ -5,6 +5,8 @@ using Nop.Data;
 using Nop.Services.Attributes;
 using Nop.Services.Directory;
 using Nop.Services.Localization;
+using Nop.Services.Common.Rules;
+using Nop.Services.Rules;
 
 namespace Nop.Services.Common;
 
@@ -157,91 +159,31 @@ public partial class AddressService : IAddressService
     /// A task that represents the asynchronous operation
     /// The task result contains the result
     /// </returns>
-    public virtual async Task<bool> IsAddressValidAsync(Address address)
+     public virtual async Task<bool> IsAddressValidAsync(Address address)
     {
         ArgumentNullException.ThrowIfNull(address);
 
-        if (string.IsNullOrWhiteSpace(address.FirstName))
-            return false;
+        var country = await _countryService.GetCountryByAddressAsync(address);
+        var states = await _stateProvinceService.GetStateProvincesByCountryIdAsync(address.CountryId.GetValueOrDefault());
+        var requiredAttributes = (await _addressAttributeService.GetAllAttributesAsync())
+            .Where(attribute => attribute.IsRequired)
+            .Select(attribute => new RequiredAttributeValue { Value = _addressAttributeParser.ParseValues(address.CustomAttributes, attribute.Id).FirstOrDefault() });
 
-        if (string.IsNullOrWhiteSpace(address.LastName))
-            return false;
-
-        if (string.IsNullOrWhiteSpace(address.Email))
-            return false;
-
-        if (_addressSettings.CompanyEnabled &&
-            _addressSettings.CompanyRequired &&
-            string.IsNullOrWhiteSpace(address.Company))
-            return false;
-
-        if (_addressSettings.StreetAddressEnabled &&
-            _addressSettings.StreetAddressRequired &&
-            string.IsNullOrWhiteSpace(address.Address1))
-            return false;
-
-        if (_addressSettings.StreetAddress2Enabled &&
-            _addressSettings.StreetAddress2Required &&
-            string.IsNullOrWhiteSpace(address.Address2))
-            return false;
-
-        if (_addressSettings.ZipPostalCodeEnabled &&
-            _addressSettings.ZipPostalCodeRequired &&
-            string.IsNullOrWhiteSpace(address.ZipPostalCode))
-            return false;
-
-        if (_addressSettings.CountryEnabled)
-        {
-            var country = await _countryService.GetCountryByAddressAsync(address);
-            if (country == null)
-                return false;
-
-            if (_addressSettings.StateProvinceEnabled)
-            {
-                var states = await _stateProvinceService.GetStateProvincesByCountryIdAsync(country.Id);
-                if (states.Any())
-                {
-                    if (address.StateProvinceId == null || address.StateProvinceId.Value == 0)
-                        return false;
-
-                    var state = states.FirstOrDefault(x => x.Id == address.StateProvinceId.Value);
-                    if (state == null)
-                        return false;
-                }
-            }
-        }
-
-        if (_addressSettings.CountyEnabled &&
-            _addressSettings.CountyRequired &&
-            string.IsNullOrWhiteSpace(address.County))
-            return false;
-
-        if (_addressSettings.CityEnabled &&
-            _addressSettings.CityRequired &&
-            string.IsNullOrWhiteSpace(address.City))
-            return false;
-
-        if (_addressSettings.PhoneEnabled &&
-            _addressSettings.PhoneRequired &&
-            string.IsNullOrWhiteSpace(address.PhoneNumber))
-            return false;
-
-        if (_addressSettings.FaxEnabled &&
-            _addressSettings.FaxRequired &&
-            string.IsNullOrWhiteSpace(address.FaxNumber))
-            return false;
-
-        var requiredAttributes = (await _addressAttributeService.GetAllAttributesAsync()).Where(x => x.IsRequired);
-
-        foreach (var requiredAttribute in requiredAttributes)
-        {
-            var value = _addressAttributeParser.ParseValues(address.CustomAttributes, requiredAttribute.Id);
-
-            if (!value.Any() || string.IsNullOrEmpty(value[0]))
-                return false;
-        }
-
-        return true;
+        return !NopRuleEngine.StartSession(AddressValidation.Tag,
+            [
+                address, _addressSettings, country, .. states, .. requiredAttributes,
+                new RequiredField { Enabled = true, Required = true, Value = address.FirstName },
+                new RequiredField { Enabled = true, Required = true, Value = address.LastName },
+                new RequiredField { Enabled = true, Required = true, Value = address.Email },
+                new RequiredField { Enabled = _addressSettings.CompanyEnabled, Required = _addressSettings.CompanyRequired, Value = address.Company },
+                new RequiredField { Enabled = _addressSettings.StreetAddressEnabled, Required = _addressSettings.StreetAddressRequired, Value = address.Address1 },
+                new RequiredField { Enabled = _addressSettings.StreetAddress2Enabled, Required = _addressSettings.StreetAddress2Required, Value = address.Address2 },
+                new RequiredField { Enabled = _addressSettings.ZipPostalCodeEnabled, Required = _addressSettings.ZipPostalCodeRequired, Value = address.ZipPostalCode },
+                new RequiredField { Enabled = _addressSettings.CountyEnabled, Required = _addressSettings.CountyRequired, Value = address.County },
+                new RequiredField { Enabled = _addressSettings.CityEnabled, Required = _addressSettings.CityRequired, Value = address.City },
+                new RequiredField { Enabled = _addressSettings.PhoneEnabled, Required = _addressSettings.PhoneRequired, Value = address.PhoneNumber },
+                new RequiredField { Enabled = _addressSettings.FaxEnabled, Required = _addressSettings.FaxRequired, Value = address.FaxNumber }
+            ]).Query<AddressInvalid>().Any();
     }
 
     /// <summary>

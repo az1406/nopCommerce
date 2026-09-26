@@ -139,31 +139,8 @@ public partial class TaxService : ITaxService
     /// A task that represents the asynchronous operation
     /// The task result contains the package for tax calculation
     /// </returns>
-     protected virtual async Task<TaxRateRequest> PrepareTaxRateRequestAsync(Product product, int taxCategoryId, Customer customer, decimal price)
-    {
-        ArgumentNullException.ThrowIfNull(customer);
-
-        var store = await _storeContext.GetCurrentStoreAsync();
-        var pickupPoint = await _genericAttributeService.GetAttributeAsync<PickupPoint>(customer,
-            NopCustomerDefaults.SelectedPickupPointAttribute, store.Id);
-
-        var candidates = new TaxAddressCandidates
-        {
-            PickupPointAddress = pickupPoint is null ? null : await LoadPickupPointTaxAddressAsync(pickupPoint),
-            DetectedCountry = _taxSettings.AutomaticallyDetectCountry
-                ? await _countryService.GetCountryByTwoLetterIsoCodeAsync(await _geoLookupService.LookupCountryIsoCodeAsync(_webHelper.GetCurrentIpAddress()))
-                : null,
-            BillingAddress = await _customerService.GetCustomerBillingAddressAsync(customer),
-            ShippingAddress = await _customerService.GetCustomerShippingAddressAsync(customer),
-            DefaultAddress = await LoadDefaultTaxAddressAsync()
-        };
-
-        return new TaxRateRequest
-        {
-            Customer = customer,
-            Product = product,
-            Price = price,
- protected virtual async Task<TaxRateRequest> PrepareTaxRateRequestAsync(Product product, int taxCategoryId, Customer customer, decimal price)
+    /// 
+    protected virtual async Task<TaxRateRequest> PrepareTaxRateRequestAsync(Product product, int taxCategoryId, Customer customer, decimal price)
     {
         ArgumentNullException.ThrowIfNull(customer);
 
