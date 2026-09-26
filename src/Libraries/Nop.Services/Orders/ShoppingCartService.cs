@@ -22,6 +22,8 @@ using Nop.Services.Seo;
 using Nop.Services.Shipping;
 using Nop.Services.Shipping.Date;
 using Nop.Services.Stores;
+using Nop.Services.Orders.Rules;
+using Nop.Services.Rules;
 
 namespace Nop.Services.Orders;
 
@@ -1408,7 +1410,7 @@ public partial class ShoppingCartService : IShoppingCartService
     /// A task that represents the asynchronous operation
     /// The task result contains the shopping cart unit price (one item). Applied discount amount. Applied discounts
     /// </returns>
-    public virtual async Task<(decimal unitPrice, decimal discountAmount, List<Discount> appliedDiscounts)> GetUnitPriceAsync(Product product,
+     public virtual async Task<(decimal unitPrice, decimal discountAmount, List<Discount> appliedDiscounts)> GetUnitPriceAsync(Product product,
         Customer customer,
         Store store,
         ShoppingCartType shoppingCartType,
@@ -1422,77 +1424,27 @@ public partial class ShoppingCartService : IShoppingCartService
 
         ArgumentNullException.ThrowIfNull(customer);
 
-        var discountAmount = decimal.Zero;
-        var appliedDiscounts = new List<Discount>();
-
-        decimal finalPrice;
-
         var combination = await _productAttributeParser.FindProductAttributeCombinationAsync(product, attributesXml);
-        if (combination?.OverriddenPrice.HasValue ?? false)
-        {
-            (_, finalPrice, discountAmount, appliedDiscounts) = await _priceCalculationService.GetFinalPriceAsync(product,
-                customer,
-                store,
-                combination.OverriddenPrice.Value,
-                decimal.Zero,
-                includeDiscounts,
-                quantity,
-                product.IsRental ? rentalStartDate : null,
-                product.IsRental ? rentalEndDate : null);
-        }
-        else
-        {
-            //summarize price of all attributes
-            var attributesTotalPrice = decimal.Zero;
-            var attributeValues = await _productAttributeParser.ParseProductAttributeValuesAsync(attributesXml);
-            if (attributeValues != null)
-            {
-                foreach (var attributeValue in attributeValues)
+        var attributesTotalPrice = await (await _productAttributeParser.ParseProductAttributeValuesAsync(attributesXml))
+            .AggregateAwaitAsync(decimal.Zero, async (total, value) =>
+                total + await _priceCalculationService.GetProductAttributeValuePriceAdjustmentAsync(product, value, customer, store, null, quantity));
+        var cartQuantity = (await GetShoppingCartAsync(customer, shoppingCartType: shoppingCartType, productId: product.Id))
+            .Sum(item => item.Quantity);
+
+        var price = NopRuleEngine.StartSession(UnitPricing.Tag, product, combination, _shoppingCartSettings,
+                new UnitPriceRequest
                 {
-                    attributesTotalPrice += await _priceCalculationService.GetProductAttributeValuePriceAdjustmentAsync(product,
-                        attributeValue,
-                        customer,
-                        store,
-                        product.CustomerEntersPrice ? (decimal?)customerEnteredPrice : null,
-                        quantity);
-                }
-            }
+                    Quantity = quantity,
+                    CartQuantity = cartQuantity,
+                    AttributesTotalPrice = attributesTotalPrice
+                })
+            .Query<FinalPriceInput>().SingleOrDefault();
 
-            //get price of a product (with previously calculated price of all attributes)
-            if (product.CustomerEntersPrice)
-            {
-                finalPrice = customerEnteredPrice;
-            }
-            else
-            {
-                int qty;
-                if (_shoppingCartSettings.GroupTierPricesForDistinctShoppingCartItems)
-                {
-                    //the same products with distinct product attributes could be stored as distinct "ShoppingCartItem" records
-                    //so let's find how many of the current products are in the cart                        
-                    qty = (await GetShoppingCartAsync(customer, shoppingCartType: shoppingCartType, productId: product.Id))
-                        .Sum(x => x.Quantity);
+        var (_, finalPrice, discountAmount, appliedDiscounts) = price is null
+            ? (decimal.Zero, customerEnteredPrice, decimal.Zero, new List<Discount>())
+            : await _priceCalculationService.GetFinalPriceAsync(product, customer, store,
+                price.OverriddenPrice, price.AdditionalCharge, includeDiscounts, price.Quantity, rentalStartDate, rentalEndDate);
 
-                    if (qty == 0)
-                        qty = quantity;
-                }
-                else
-                {
-                    qty = quantity;
-                }
-
-                (_, finalPrice, discountAmount, appliedDiscounts) = await _priceCalculationService.GetFinalPriceAsync(product,
-                    customer,
-                    store,
-                    attributesTotalPrice,
-                    includeDiscounts,
-                    qty,
-                    product.IsRental ? rentalStartDate : null,
-                    product.IsRental ? rentalEndDate : null);
-            }
-        }
-
-        //rounding
         if (_shoppingCartSettings.RoundPricesDuringCalculation)
             finalPrice = await _priceCalculationService.RoundPriceAsync(finalPrice);
 
